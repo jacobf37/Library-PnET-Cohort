@@ -34,7 +34,7 @@ jobs:
 
     steps:
       # --------------------------------------------------
-      # CHECKOUT (persist credentials so we can commit/push)
+      # CHECKOUT (persist credentials so commit/push works)
       # --------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -71,6 +71,35 @@ jobs:
         run: dotnet nuget list source
 
       # --------------------------------------------------
+      # DOWNLOAD REQUIRED LANDIS LIBRARY DLLs TO src/lib/
+      # --------------------------------------------------
+      - name: Download LANDIS-II Support Libraries
+        run: |
+          $base = "https://github.com/LANDIS-II-Foundation/Support-Library-Dlls-v8/raw/main/"
+
+          $dlls = @(
+            "Landis.Library.Climate-v6.dll",
+            "Landis.Library.InitialCommunity.Universal-v2.dll",
+            "Landis.Library.UniversalCohorts-v2.dll",
+            "Landis.Library.Parameters-v2.dll",
+            "Landis.Library.Metadata-v2.dll",
+            "Landis.Library.Succession-v10.dll",
+            "Landis.Library.PnETCohorts-v2.dll"
+          )
+
+          $target = "./src/lib"
+          if (!(Test-Path $target)) {
+              New-Item -ItemType Directory -Path $target | Out-Null
+          }
+
+          foreach ($name in $dlls) {
+              $url = $base + $name
+              $dest = "$target/$name"
+              Write-Host "Downloading $name ..."
+              Invoke-WebRequest -Uri $url -OutFile $dest
+          }
+
+      # --------------------------------------------------
       # UPDATE VERSION IN CSPROJ
       # --------------------------------------------------
       - name: Update csproj version fields
@@ -85,7 +114,7 @@ jobs:
           $xml = $xml -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$v</FileVersion>"
 
           Set-Content $csproj.FullName $xml
-          Write-Host "Updated version fields in $($csproj.FullName)"
+          Write-Host "Stamping .csproj with version $v"
 
       # --------------------------------------------------
       # INSTALL .NET SDK
@@ -96,40 +125,39 @@ jobs:
           dotnet-version: 8.0.x
 
       # --------------------------------------------------
-      # BUILD DLL
+      # RESTORE + BUILD DLL
       # --------------------------------------------------
-      - name: Restore
+      - name: Restore project
         run: |
           $csproj = Get-ChildItem -Path . -Filter *.csproj -Recurse | Select-Object -First 1
           dotnet restore $csproj.FullName
 
-      - name: Build
+      - name: Build project
         run: |
           $csproj = Get-ChildItem -Path . -Filter *.csproj -Recurse | Select-Object -First 1
           dotnet build $csproj.FullName --configuration Release
 
       # --------------------------------------------------
-      # MOVE OLD DLLs (archive)
+      # MOVE OLD DLLs TO past-releases/
       # --------------------------------------------------
-      - name: Move previous DLLs to past-releases
+      - name: Archive previous DLLs
         run: |
           $pastDir = "./deploy/past-releases"
-          if (-not (Test-Path $pastDir)) {
+          if (!(Test-Path $pastDir)) {
             New-Item -ItemType Directory -Path $pastDir | Out-Null
           }
 
-          # Only move DLLs from a Release directory
-          $dlls = Get-ChildItem -Path . -Recurse -Filter *.dll | Where-Object { $_.FullName -match 'bin\\Release' }
+          $dlls = Get-ChildItem -Recurse -Filter *.dll | Where-Object { $_.FullName -match 'bin\\Release' }
 
           foreach ($dll in $dlls) {
-            Write-Host "Archiving previous DLL: $($dll.Name)"
+            Write-Host "Archiving: $($dll.Name)"
             Move-Item $dll.FullName $pastDir -Force
           }
 
       # --------------------------------------------------
-      # CREATE RELEASE & UPLOAD DLL
+      # CREATE RELEASE AND ATTACH DLL
       # --------------------------------------------------
-      - name: Upload Release
+      - name: Publish DLL Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', steps.version.outputs.v) || github.ref_name }}
@@ -150,7 +178,6 @@ jobs:
 
           git add -A
 
-          # Commit only if changes exist
           if (git diff --cached --quiet) {
               Write-Host "No changes to commit."
           } else {
