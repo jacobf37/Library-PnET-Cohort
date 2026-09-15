@@ -55,6 +55,17 @@ jobs:
 
           Write-Error "No valid version source found."
 
+
+      # --------------------------------------------------
+      # ADD MYGET FEED (FIX FOR Landis.Core)
+      # --------------------------------------------------
+      - name: Add MyGet LANDIS-II feed
+        run: dotnet nuget add source "https://www.myget.org/F/landis-ii-v8/api/v3/index.json" --name LANDIS-II-V8
+
+      - name: List NuGet sources (debug)
+        run: dotnet nuget list source
+
+
       # --------------------------------------------------
       # UPDATE VERSION IN CSPROJ
       # --------------------------------------------------
@@ -71,13 +82,15 @@ jobs:
 
           Set-Content $csproj.FullName $xml
 
+
       # --------------------------------------------------
-      # Install .NET
+      # INSTALL .NET SDK
       # --------------------------------------------------
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+
 
       # --------------------------------------------------
       # BUILD DLL
@@ -92,37 +105,39 @@ jobs:
           $csproj = Get-ChildItem -Path . -Filter *.csproj -Recurse | Select-Object -First 1
           dotnet build $csproj.FullName --configuration Release
 
-      # --------------------------------------------------
-      # MOVE PREVIOUS DLL TO past-releases
-      # --------------------------------------------------
-      - name: Move previous DLLs
-        run: |
-          $dllDir = "./bin/Release"
-          $pastDir = "./deploy/past-releases"
 
+      # --------------------------------------------------
+      # MOVE OLD DLL TO ARCHIVE
+      # --------------------------------------------------
+      - name: Move previous DLLs to past-releases
+        run: |
+          $pastDir = "./deploy/past-releases"
           if (-not (Test-Path $pastDir)) {
             New-Item -ItemType Directory -Path $pastDir | Out-Null
           }
 
-          $old = Get-ChildItem $dllDir -Filter "*.dll"
+          $dlls = Get-ChildItem -Path . -Filter *.dll -Recurse | Where-Object { $_.FullName -match "bin\\Release" }
 
-          foreach ($f in $old) {
-            Move-Item $f.FullName $pastDir -Force
+          foreach ($dll in $dlls) {
+            Write-Host "Archiving previous DLL: $($dll.Name)"
+            Move-Item $dll.FullName $pastDir -Force
           }
 
+
       # --------------------------------------------------
-      # CREATE RELEASE AND ATTACH DLL
+      # CREATE RELEASE AND ATTACH BUILT DLL
       # --------------------------------------------------
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', steps.version.outputs.v) || github.ref_name }}
-          name: "DLL Release v${{ steps.version.outputs.v }}"
+          name: "Release v${{ steps.version.outputs.v }}"
           body: ${{ inputs.notes }}
           files: |
             **/bin/Release/*.dll
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
       # --------------------------------------------------
       # COMMIT VERSION UPDATE (OPTIONAL)
@@ -132,5 +147,5 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add .
-          git commit -m "Update project version to ${{ steps.version.outputs.v }}"
+          git commit -m "Update DLL project version to ${{ steps.version.outputs.v }}"
           git push
