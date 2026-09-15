@@ -17,11 +17,13 @@ on:
           - patch
           - minor
           - major
+
       base_version:
-        description: "Optional base version (e.g., 6.1.1). If empty, latest tag is used."
+        description: "Optional base version (e.g., 1.0.0). If empty, the latest tag is used."
         required: false
+
       notes:
-        description: "Release notes / description for this version"
+        description: "Release notes text for this version"
         required: false
 
 jobs:
@@ -29,11 +31,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Determine starting version
-        id: startver
+      - name: Determine base version
+        id: base
         run: |
           if [ -n "${{ github.event.inputs.base_version }}" ]; then
             echo "base=${{ github.event.inputs.base_version }}" >> $GITHUB_OUTPUT
@@ -46,7 +48,7 @@ jobs:
       - name: Compute bumped version
         id: bumpver
         run: |
-          base="${{ steps.startver.outputs.base }}"
+          base="${{ steps.base.outputs.base }}"
           bump="${{ github.event.inputs.bump }}"
 
           arr=(${base//./ })
@@ -71,7 +73,7 @@ jobs:
           git tag "v$next"
           git push origin "v$next"
 
-      - name: Trigger Build-Release workflow with notes
+      - name: Trigger Build-Release workflow
         uses: actions/github-script@v7
         with:
           script: |
