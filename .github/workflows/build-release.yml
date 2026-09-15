@@ -33,18 +33,18 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # --------------------------------------------------
-      # CHECKOUT (persist credentials so commit/push works)
-      # --------------------------------------------------
+      # ---------------------------
+      # CHECKOUT with commit rights
+      # ---------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: true
           fetch-depth: 0
 
-      # --------------------------------------------------
+      # ---------------------------
       # DETERMINE VERSION
-      # --------------------------------------------------
+      # ---------------------------
       - name: Determine version
         id: version
         run: |
@@ -61,18 +61,18 @@ jobs:
 
           Write-Error "No valid version source found."
 
-      # --------------------------------------------------
-      # ADD MYGET FEED (fixes Landis.Core restore errors)
-      # --------------------------------------------------
+      # ---------------------------
+      # ADD MYGET FEED (Landis.Core)
+      # ---------------------------
       - name: Add MyGet LANDIS-II feed
         run: dotnet nuget add source "https://www.myget.org/F/landis-ii-v8/api/v3/index.json" --name LANDIS-II-V8
 
-      - name: List NuGet sources (debug)
+      - name: List NuGet sources
         run: dotnet nuget list source
 
-      # --------------------------------------------------
-      # DOWNLOAD REQUIRED LANDIS LIBRARY DLLs TO src/lib/
-      # --------------------------------------------------
+      # ---------------------------
+      # DOWNLOAD LANDIS-II SUPPORT DLLs INTO src/lib
+      # ---------------------------
       - name: Download LANDIS-II Support Libraries
         run: |
           $base = "https://github.com/LANDIS-II-Foundation/Support-Library-Dlls-v8/raw/main/"
@@ -99,9 +99,9 @@ jobs:
               Invoke-WebRequest -Uri $url -OutFile $dest
           }
 
-      # --------------------------------------------------
+      # ---------------------------
       # UPDATE VERSION IN CSPROJ
-      # --------------------------------------------------
+      # ---------------------------
       - name: Update csproj version fields
         run: |
           $v = "${{ steps.version.outputs.v }}"
@@ -114,63 +114,49 @@ jobs:
           $xml = $xml -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$v</FileVersion>"
 
           Set-Content $csproj.FullName $xml
-          Write-Host "Stamping .csproj with version $v"
+          Write-Host "Updated version fields to $v"
 
-      # --------------------------------------------------
+      # ---------------------------
       # INSTALL .NET SDK
-      # --------------------------------------------------
+      # ---------------------------
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      # --------------------------------------------------
-      # RESTORE + BUILD DLL
-      # --------------------------------------------------
-      - name: Restore project
+      # ---------------------------
+      # BUILD DLL
+      # ---------------------------
+      - name: Restore
         run: |
           $csproj = Get-ChildItem -Path . -Filter *.csproj -Recurse | Select-Object -First 1
           dotnet restore $csproj.FullName
 
-      - name: Build project
+      - name: Build
         run: |
           $csproj = Get-ChildItem -Path . -Filter *.csproj -Recurse | Select-Object -First 1
           dotnet build $csproj.FullName --configuration Release
 
-      # --------------------------------------------------
-      # MOVE OLD DLLs TO past-releases/
-      # --------------------------------------------------
-      - name: Archive previous DLLs
-        run: |
-          $pastDir = "./deploy/past-releases"
-          if (!(Test-Path $pastDir)) {
-            New-Item -ItemType Directory -Path $pastDir | Out-Null
-          }
-
-          $dlls = Get-ChildItem -Recurse -Filter *.dll | Where-Object { $_.FullName -match 'bin\\Release' }
-
-          foreach ($dll in $dlls) {
-            Write-Host "Archiving: $($dll.Name)"
-            Move-Item $dll.FullName $pastDir -Force
-          }
-
-      # --------------------------------------------------
-      # CREATE RELEASE AND ATTACH DLL
-      # --------------------------------------------------
-      - name: Publish DLL Release
+      # ---------------------------
+      # CREATE RELEASE AND UPLOAD DLL
+      # ---------------------------
+      - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', steps.version.outputs.v) || github.ref_name }}
           name: "Release v${{ steps.version.outputs.v }}"
           body: ${{ inputs.notes }}
+
+          # IMPORTANT: UNIVERSAL DLL PATTERN
           files: |
-            **/bin/Release/*.dll
+            **/bin/Release/**/*.dll
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --------------------------------------------------
-      # COMMIT VERSION UPDATES
-      # --------------------------------------------------
+      # ---------------------------
+      # COMMIT VERSION UPDATES BACK TO REPO
+      # ---------------------------
       - name: Commit version updates
         run: |
           git config user.name "github-actions[bot]"
